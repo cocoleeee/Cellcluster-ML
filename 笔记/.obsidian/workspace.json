@@ -35,8 +35,7 @@
               "title": "scSemiAE代码"
             }
           }
-        ],
-        "currentTab": 1
+        ]
       }
     ],
     "direction": "vertical"
@@ -180,9 +179,10 @@
       "command-palette:Open command palette": false
     }
   },
-  "active": "9509d01989476535",
+  "active": "af62df241da18b73",
   "lastOpenFiles": [
+    "scSemiAE代码.md",
     "scSemiAE论文.md",
-    "scSemiAE代码.md"
+    "Pasted image 20250804004624.png"
   ]
 }

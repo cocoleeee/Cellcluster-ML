@@ -33,94 +33,47 @@ parser.add_argument('-v', '--visual', type=bool, default=False, help='是否可�
 ##### 2. `load_all(...)`
 
 **作用：**  
-加载表达矩阵 + 标签信息，并按设置划分出有标签样本和无标签样本的索引，同时返回包含细胞ID、标签映射等的额外信息。
+加载所有数据，并根据参数决定哪部分标签“可见”（labeled）哪部分“隐藏”（unlabeled），模拟半监督情况。返回表达矩阵、完整标签、被保留的有标签索引、无标签索引，以及一些辅助信息。
 
 **返回内容包括：**
 
-- `expr`：表达矩阵（NumPy数组）
-    
-- `lab_full`：所有细胞的数字标签
-    
-- `labeled_idx`：有标签样本索引
-    
-- `unlabeled_idx`：无标签样本索引
-    
-- `info`：元信息（标签映射、细胞ID、基因名等）
+- 读出表达矩阵为 `expr`（numpy 数组）。
+- 用 `celllabel_to_numeric` 将指定的 label（如 `celltype`）映射成整数，并拿到完整标签 `lab_full`。
+- 根据 `number_of_hide`：
+    - 如果为 0，调用 `hide_labs`：按每类保留一定数目/比例标签。
+    - 否则调用 `hide_some_labs`：只对部分类保留标签，其他类全部隐藏。
+- 构造 `info` 字典包括
+    - 原始的 label 映射（`cell_label`）、cell id、gene names。
     
 
 ---
 
 ##### 3. `hide_labs(...)`
 
-**作用：**  
-根据每类样本的比例或数量，隐藏部分标签，模拟半监督学习。适合**“所有类别都有标签但不完整”**的情况。
+对每个类别独立地，按照 `labeled_size`（或 `labeled_ratio` 计算后）取前若干个样本保留标签，其余归为无标签。
 
-**输入：**
 
-- `lab`：所有样本的标签（整数形式）
-    
-
-**输出：**
-
-- 有/无标签样本的索引
+- 使用 `gen_idx_byclass` 把同类样本的索引聚在一起。
+- 每类内部用固定的 `seed` 进行 shuffle，保证重复运行一致。
+- 如果 `labeled_ratio` 存在，会覆盖 `self.labeled_size`（按当前类大小重新计算）。
+- 如果 `labeled_size` >= 该类总数，则保留全部标签。
+- 返回两个列表：`labeled_idx`（保留标签的样本索引）和 `unlabeled_idx`（隐藏标签的样本索引）。
     
 
 ---
 
 ##### 4. `hide_some_labs(...)`
 
-**作用：**  
-进一步模拟更困难的情形：只对**部分细胞类型**保留标签，其他类型完全无标签，常用于**零样本或小样本学习**。
+模拟“只部分类别有标签”的情况：只对前 `number` 个（顺序打乱后）满足样本数 >= 50 的类保留标签，其余类全部隐藏；样本数 <50 的类全部隐藏。
 
-**输入：**
 
-- `lab`：所有样本的标签   
-- `number`：想要保留标签的细胞类别数量    
 
-**输出：**
-
-- 有/无标签样本的索引
+- `number` 表示“有标签的类别个数”
+- 使用 `random.Random(self.seed).shuffle(idx_byclass)` 试图打乱字典。
+- 接下来对前 `number` 个符合条件的类做类似 `hide_labs` 的处理，对其他类直接把它们全部加入 `unlabeled_idx`。 
+- 同样处理 `labeled_ratio` 覆盖 `self.labeled_size` 的逻辑。
     
 
 ---
 
-## 🛠️ 辅助函数（外部）
-
-### 5. `gen_idx_byclass(labels)`
-
-**作用：**  
-将标签列表分类，返回一个字典：  
-`{class_label: [该类对应的样本索引]}`
-
-便于后续按类别进行标签隐藏或划分。
-
----
-
-### 6. `celllabel_to_numeric(celllabel)`
-
-**作用：**  
-将原始的细胞类型（字符串）转换为整数形式（模型可接受），同时生成数字与原始标签之间的映射关系。
-
-**返回：**
-
-- `mapping`：整数 ↔ 细胞标签 映射字典
-    
-- `truth_labels`：转为数字的标签数组（NumPy）
-    
-
----
-
-### 7. `techtype_to_numeric(batch_name)`
-
-**作用：**  
-将批次信息（如测序平台名等字符串）转换为整数标签，用于后续 batch effect 处理或可视化。
-
-**返回：**
-
-- `mapping`：整数 ↔ 批次名 映射字典
-    
-- `truth_batches`：转为整数的批次数组（NumPy）
-    
-
----
-
+![[Pasted image 20250804004624.png]]
