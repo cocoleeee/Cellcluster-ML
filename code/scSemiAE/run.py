@@ -35,6 +35,7 @@ import torch
 import matplotlib.pyplot as plt
 from data import Data
 import warnings
+import numpy as np
 warnings.filterwarnings("ignore")
 
 # 主函数入口
@@ -45,36 +46,36 @@ def main():
     device = 'cuda:0' if torch.cuda.is_available() and args.cuda else 'cpu'
     args.device = device  # 保存到 args 中方便传递
 
-    # 加载数据
-    if args.lab_ratio != -1:  # 如果设置了标签比例
-        dataset = Data(args.data_path, labeled_ratio=args.lab_ratio, seed=args.seed)
-    else:  # 否则使用标签数量
-        dataset = Data(args.data_path, labeled_size=args.lab_size, seed=args.seed)
+    # # 加载数据
+    # if args.lab_ratio != -1:  # 如果设置了标签比例
+    #     dataset = Data(args.data_path, labeled_ratio=args.lab_ratio, seed=args.seed)
+    # else:  # 否则使用标签数量
+    #     dataset = Data(args.data_path, labeled_size=args.lab_size, seed=args.seed)
 
-    # 获取数据与标签信息
-    data, lab_full, labeled_idx, unlabeled_idx, info = dataset.load_all()
+    # # 获取数据与标签信息
+    # data, lab_full, labeled_idx, unlabeled_idx, info = dataset.load_all()
 
-    # 转为 torch tensor 格式
-    data = torch.tensor(data, dtype=torch.float)
-    cell_id = info["cell_id"]
+    # # 转为 torch tensor 格式
+    # data = torch.tensor(data, dtype=torch.float)
+    # cell_id = info["cell_id"]
 
-    # 分别处理有标签和无标签数据
-    labeled_data = data[labeled_idx, :]
+    # # 分别处理有标签和无标签数据
+    # labeled_data = data[labeled_idx, :]
 
-    labeled_lab = lab_full[labeled_idx].tolist()
-    # print(labeled_lab)
+    # labeled_lab = lab_full[labeled_idx].tolist()
+    # # print(labeled_lab)
 
-    # unlabeled_lab = lab_full[unlabeled_idx].tolist()
-    # print(unlabeled_lab)
-    unlabeled_lab=[]
-    labeled_cellid = cell_id[labeled_idx].tolist()
-
-
+    # # unlabeled_lab = lab_full[unlabeled_idx].tolist()
+    # # print(unlabeled_lab)
+    # unlabeled_lab=[]
+    # labeled_cellid = cell_id[labeled_idx].tolist()
 
 
-    # 构建 PyTorch 数据集
-    pretrain_data = ExperimentDataset(data, cell_id, lab_full)
-    labeled_data = ExperimentDataset(labeled_data, labeled_cellid, labeled_lab)
+
+
+    # # 构建 PyTorch 数据集
+    # pretrain_data = ExperimentDataset(data, cell_id, lab_full)
+    # labeled_data = ExperimentDataset(labeled_data, labeled_cellid, labeled_lab)
 
 
 
@@ -98,6 +99,12 @@ def main():
     all_idx = list(range(adata.n_obs))
     unlabeled_idx = [i for i in all_idx if i not in all_idx]
     unlabeled_lab=[]
+
+
+
+
+
+
 
     pretrain_data = ExperimentDataset(data, cell_id, lab_full)
     labeled_data = ExperimentDataset(labeled_data, labeled_cellid, labeled_lab)
@@ -157,9 +164,26 @@ def main():
 
     # embeddings = embeddings.values  # numpy array
     # 假设 adata 已经读入，embeddings 是 numpy array 对应 adata.obs_names
-    cluster_and_plot(adata, embeddings, method="louvain", resolution=1.0, title_suffix="scSemiAE")
-    cluster_and_plot(adata, embeddings, method="kmeans", resolution=1.0, title_suffix="scSemiAE")
+    adata=cluster_and_plot(adata, embeddings, method="louvain", resolution=1.0, title_suffix="scSemiAE")
+    # adata=cluster_and_plot(adata, embeddings, method="kmeans", resolution=1.0, title_suffix="scSemiAE")
 
+    
+    # 初始化全 False
+    user_sel = np.zeros(adata.n_obs, dtype=bool)
+    # 把那些选中的索引置 True
+    user_sel[cell_idx_list] = True
+    # 写入 adata.obs
+    adata.obs['user_selected'] = user_sel
+
+
+    from eval import plot_similar_n, compute_dist_metrics, plot_nearest_n
+
+
+    props = plot_similar_n(adata, max_n=20)
+    metrics = compute_dist_metrics(adata, plot=True)
+    n_list, results = plot_nearest_n(adata)
+
+    
 
 
 

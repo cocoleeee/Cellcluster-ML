@@ -100,6 +100,8 @@ def cluster_and_plot(adata, embeddings, method="louvain", resolution=1.0, title_
         cluster_key = "kmeans"
     else:
         raise ValueError(f"unknown method {method}")
+    
+    em.obs['cluster'] = em.obs[cluster_key].astype(str).values
 
     # 4. 可视化 UMAP，按聚类上色
     sc.pl.umap(em,size=10, color=[cluster_key], title=f"UMAP {method} {title_suffix}", show=True)
