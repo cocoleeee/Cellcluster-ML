@@ -88,7 +88,7 @@ def main():
     lab_full=[]
 
     from utils import extract_cells_by_index
-    cell_idx_list = [23,36,60,113,136,237,245,326,369,471,477,481,528,621,712,725,746,764,835,952,1011,1155,1161,1186,1193,1210,1277,1289,1301,1398,1431,1460,1463,1493,1600,1649,1755,1760,1842,1927,2033,2151,2152,2257,2276,2329,2463,2468,2644,2666,2736,2826,2853]
+    cell_idx_list = [13,42,46,66,70,112,166,194,290,332,342,405,444,513,518,537,710,720,723,950,957,963,1084,1085,1111,1132,1160,1207,1252,1308,1311,1337,1354,1443,1491,1536,1547,1585,1703,1712,1750,1800,1908,1928,1962,2065,2112,2131,2166,2292,2305,2324,2343,2346,2350,2382,2440,2715,2745,2747,2768,2932,2944,2969,2977,2992]
     labeled_cellid, labeled_data = extract_cells_by_index(adata, cell_idx_list)
     # print(cell_id)
     # print(expr_df)
@@ -164,11 +164,17 @@ def main():
 
     # embeddings = embeddings.values  # numpy array
     # 假设 adata 已经读入，embeddings 是 numpy array 对应 adata.obs_names
-    adata=cluster_and_plot(adata, embeddings, method="louvain", resolution=1.0, title_suffix="scSemiAE")
+    adata_cluster=cluster_and_plot(adata, embeddings, method="louvain", resolution=1.0, title_suffix="scSemiAE")
     # adata=cluster_and_plot(adata, embeddings, method="kmeans", resolution=1.0, title_suffix="scSemiAE")
 
     
     # 初始化全 False
+    user_sel = np.zeros(adata_cluster.n_obs, dtype=bool)
+    # 把那些选中的索引置 True
+    user_sel[cell_idx_list] = True
+    # 写入 adata.obs
+    adata_cluster.obs['user_selected'] = user_sel
+
     user_sel = np.zeros(adata.n_obs, dtype=bool)
     # 把那些选中的索引置 True
     user_sel[cell_idx_list] = True
@@ -179,11 +185,17 @@ def main():
     from eval import plot_similar_n, compute_dist_metrics, plot_nearest_n
 
 
-    props = plot_similar_n(adata, max_n=20)
-    metrics = compute_dist_metrics(adata, plot=True)
-    n_list, results = plot_nearest_n(adata)
 
-    
+    # # adata.obs['annotation'] = adata.obs['annotation'].astype(str)
+    # plot_similar_n(adata, max_n=20, cluster_col='leiden-1')
+    # compute_dist_metrics(adata, cluster_col='leiden-1', plot=True)
+    # plot_nearest_n(adata, cluster_col='leiden-1')
+
+    props = plot_similar_n(adata_cluster, max_n=20)
+    metrics = compute_dist_metrics(adata_cluster, plot=True)
+    n_list, results = plot_nearest_n(adata_cluster)
+
+
 
 
 
