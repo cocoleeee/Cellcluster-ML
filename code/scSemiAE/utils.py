@@ -69,7 +69,7 @@ import anndata
 import numpy as np
 import matplotlib.pyplot as plt
 
-def cluster_and_plot(adata, embeddings, method="louvain", resolution=1.0, title_suffix=""):
+def cluster_and_plot(adata, embeddings, method="leiden", resolution=1.0, title_suffix=""):
     """
     adata: 原始 AnnData（需要和 embeddings 样本顺序一致）
     embeddings: numpy array of shape (n_obs, embedding_dim) from scSemiAE
@@ -102,6 +102,10 @@ def cluster_and_plot(adata, embeddings, method="louvain", resolution=1.0, title_
         raise ValueError(f"unknown method {method}")
     
     em.obs['cluster'] = em.obs[cluster_key].astype(str).values
+
+
+
+
 
     # 4. 可视化 UMAP，按聚类上色
     sc.pl.umap(em,size=10, color=[cluster_key], title=f"UMAP {method} {title_suffix}", show=True)

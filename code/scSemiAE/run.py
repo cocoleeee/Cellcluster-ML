@@ -185,11 +185,36 @@ def main():
     from eval import plot_similar_n, compute_dist_metrics, plot_nearest_n
 
 
+    print('adata user_selected  True数:', adata.obs['user_selected'].sum())
+    print('adata_cluster True数:', adata_cluster.obs['user_selected'].sum())
 
-    # # adata.obs['annotation'] = adata.obs['annotation'].astype(str)
-    # plot_similar_n(adata, max_n=20, cluster_col='leiden-1')
-    # compute_dist_metrics(adata, cluster_col='leiden-1', plot=True)
-    # plot_nearest_n(adata, cluster_col='leiden-1')
+    # 看看用户相关簇占比是否异常（如果接近所有簇，Nearest-N 会偏高）
+    # for obj, name in [(adata, 'adata'), (adata_cluster, 'adata_cluster')]:
+    #     if 'cluster' in obj.obs:
+    #         labels = obj.obs['cluster'].astype(str)
+    #         user_clusters = labels[obj.obs['user_selected']].unique()
+    #         print(f'[{name}] 总簇数={labels.nunique()}，用户相关簇数={len(user_clusters)}')
+
+
+    user_clusters_series = adata_cluster.obs.loc[adata_cluster.obs["user_selected"], "cluster"]
+
+    print("用户选择的细胞及其聚类：")
+    print(user_clusters_series)
+
+    # 如果只想看有哪些簇（去重）
+    user_cluster_list = user_clusters_series.unique()
+    print("用户选择涉及的簇:", user_cluster_list)
+
+    # 如果还想知道每个簇的用户细胞数量
+    print("用户选择簇的计数：")
+    print(user_clusters_series.value_counts())
+
+
+
+    # adata.obs['annotation'] = adata.obs['annotation'].astype(str)
+    plot_similar_n(adata, max_n=20, cluster_col='leiden-1')
+    compute_dist_metrics(adata, cluster_col='leiden-1', plot=True)
+    plot_nearest_n(adata, cluster_col='leiden-1')
 
     props = plot_similar_n(adata_cluster, max_n=20)
     metrics = compute_dist_metrics(adata_cluster, plot=True)
