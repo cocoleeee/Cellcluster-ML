@@ -13,12 +13,12 @@
             "state": {
               "type": "markdown",
               "state": {
-                "file": "scSemiAE论文.md",
+                "file": "scSemiAE代码.md",
                 "mode": "source",
                 "source": false
               },
               "icon": "lucide-file",
-              "title": "scSemiAE论文"
+              "title": "scSemiAE代码"
             }
           },
           {
@@ -181,8 +181,8 @@
   },
   "active": "af62df241da18b73",
   "lastOpenFiles": [
-    "scSemiAE代码.md",
     "scSemiAE论文.md",
+    "scSemiAE代码.md",
     "Pasted image 20250804004624.png"
   ]
 }

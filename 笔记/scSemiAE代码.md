@@ -77,3 +77,11 @@ parser.add_argument('-v', '--visual', type=bool, default=False, help='是否可�
 ---
 
 ![[Pasted image 20250804004624.png]]
+
+
+**`ExperimentDataset`**
+
+- 输入：表达矩阵、细胞 ID、标签（可为 None 或部分标签）
+- 处理：稀疏矩阵转 dense，再转 tensor
+- 提供：`__getitem__` 和 `__len__`，供 DataLoader 使用
+
