@@ -1,11 +1,20 @@
 import torch
 import pandas as pd
 from model.loss import M1_loss
-from model.loss1 import M2_loss
+from model.losses import M2_loss
 from model.net import FullNet
 from model.utils import init_data_loaders
 import numpy as np
 import matplotlib.pyplot as plt
+from torch.utils.tensorboard import SummaryWriter
+
+from torch.utils.data import DataLoader
+from sklearn.cluster import KMeans
+from model.dataset import ExperimentDataset
+
+
+import torch.nn.functional as F
+
 
 import scanpy as sc
 adata = sc.read_h5ad("sc_sampled.h5ad")
@@ -58,6 +67,17 @@ class scSemiAE:
         self.step_size = params.lr_scheduler_step
 
         self.Lambda = params.Lambda
+
+        # === TensorBoard ===
+        self.tb_writer = None
+        if SummaryWriter is not None:
+            logdir = getattr(params, "tb_logdir", "tb_log")
+            if logdir is not None:
+                try:
+                    self.tb_writer = SummaryWriter(log_dir=logdir)
+                except Exception:
+                    self.tb_writer = None
+
 
 
     def init_model(self, x_dim, hid_dim_1, hid_dim_2, p_drop, device):
@@ -112,30 +132,27 @@ class scSemiAE:
             plt.show()
 
 
-    def train(self, pretrain_flag = False, plot_flag = False):
+    def train(self, pretrain_flag=False, plot_flag=False):
         """
         Training the model.
         """
-        # pretraining stage
+        # ====== 预训练 ======
         optim_pretrain = torch.optim.Adam(params=list(self.model.parameters()), lr=self.lr)
         self.pretrain(optim_pretrain, plot_flag)
         print("pretraining is over!")
 
-        # prepare the parameters
+        # ====== 参数准备 ======
         lr = self.lr
         Lambda = self.Lambda
         epochs = 0 if pretrain_flag else self.epochs
 
-        # fine-tuning stage
-        optim = torch.optim.Adam(params=list(self.model.encoder.parameters()), lr=lr)  # only optimize for encoder
+        # 只优化 encoder
+        optim = torch.optim.Adam(params=list(self.model.encoder.parameters()), lr=lr)
         lr_scheduler = torch.optim.lr_scheduler.StepLR(
             optimizer=optim, gamma=self.lr_gamma, step_size=self.step_size
-        )  # adjust the learning rate
+        )
 
         print("fine-tuning:")
-        loss_M2 = []
-        loss_L1 = []
-        loss_L2 = []
 
         # 个性化损失的可选参数（若外部没设置，这里已有默认值）
         user_set       = getattr(self, 'user_set', None)               # set(str)
@@ -149,75 +166,137 @@ class scSemiAE:
         supcon_tau     = getattr(self, 'supcon_tau', 0.1)
         softmin_tau    = getattr(self, 'softmin_tau', 0.5)
 
+        # 为了画旧版三条曲线（M2/L1/L2），仍保留这三个容器
+        loss_M2, loss_L1, loss_L2 = [], [], []
+
+        # 我们还会统计每个 epoch 的所有分量，便于打印/TensorBoard
+        keys = [
+            'L_total','L1','L2','L_pull','L_push',
+           
+        ]
+
+        refresh_every = getattr(self, "refresh_every", 10)   # 你也可以放到 args 里
+        K_pseudo      = getattr(self, "K_pseudo", 10)
+        self._refresh_pseudo_labels(K=K_pseudo)
+
+
+
         for epoch in range(epochs):
-            M2, L1, L2 = 0, 0, 0
+            stats_sum = {k: 0.0 for k in keys}
+            n_batches = 0
+
             for idx, batch in enumerate(self.train_loader):
-                x, y, cells = batch  # ← 确保第三个是 cell id（字符串）
+                x, y, cells = batch  # 确保第三个返回的是字符串 cell id
 
-                # ====== 调试：检查 user_set 命中数 ======
-                if epoch == 0 and idx < 3:  # 只在第一个 epoch 前几个 batch 打印
-                    hits = len(set(cells) & set(self.user_set))
+                # 调试：仅首个 epoch 的前几个 batch 打印用户命中
+                if epoch == 0 and idx < 3 and user_set is not None:
+                    hits = len(set(cells) & set(user_set))
                     print(f"[debug] epoch{epoch} batch{idx}: user hits = {hits}/{len(cells)}")
-                # ========================================
 
-                x, y = x.to(self.device), y.to(self.device)
-
+                x = x.to(self.device)
+                y = y.to(self.device)
                 if y.dtype != torch.long:
                     y = y.long()
 
                 encoded, _ = self.model(x)
 
-                loss, L1_loss, L2_loss = M2_loss(
+                # ====== curriculum: 逐步增权（按 epoch 分段）======
+                ep = epoch + 1
+                if getattr(self, 'curriculum', True):
+                    if   ep <= 3:  current_w_pull, current_w_push = 0.2, 0.0
+                    elif ep <= 7:  current_w_pull, current_w_push = 0.4, 0.2
+                    else:          current_w_pull, current_w_push = 0.6, 0.3
+                else:
+                    current_w_pull, current_w_push = 0.4, 0.2  # 固定值兜底
+
+                # ====== 自适应 margin：基于当前 batch 的非用户→用户质心距离的分位数 ======
+                # if getattr(self, 'use_adaptive_margin', True) and (user_set is not None):
+                #     with torch.no_grad():
+                #         # batch 内哪些是用户样本
+                #         umask = torch.tensor([(c in user_set) for c in cells], device=self.device)
+                #         if umask.any() and (~umask).any():
+                #             # 只对“用户拉/推”分支用单位化的表示（更像余弦）
+                #             z_u = F.normalize(encoded[umask], dim=1)
+                #             z_b = F.normalize(encoded[~umask], dim=1)
+                #             c_u = z_u.mean(0, keepdim=True)  # (1, D)
+                #             d   = torch.cdist(z_b, c_u, p=2).squeeze(1)  # 非用户→用户质心距离
+                #             # 取 30% 分位做 margin，夹到 [0.3, 0.9]
+                #             m = torch.quantile(d, q=0.30).clamp_(0.3, 0.9).item()
+                #         else:
+                #             m = 0.6  # 若 batch 没有足够的用户/非用户，给个兜底
+                # else:
+                #     m = 0.6
+
+                # （可选）前几个 batch 打印看看当前权重与 margin
+                # if epoch == 0 and idx < 2:
+                #     print(f"[debug] ep{ep} batch{idx} w_pull={current_w_pull:.2f} "
+                #         f"w_push={current_w_push:.2f} margin={m:.2f}")
+
+                # === 新版 M2_loss：返回 (total_loss, comps_dict) ===
+                total_loss, comps = M2_loss(
                     encoded, y, Lambda,
                     cells=cells,
-                    user_set=user_set,
-                    alpha_user=alpha_user,
-                    beta_user=beta_user,
-                    use_triplet=use_triplet,  w_triplet=w_triplet, triplet_margin=triplet_margin,
-                    use_supcon=use_supcon,   w_supcon=w_supcon,   supcon_tau=supcon_tau,
-                    softmin_tau=softmin_tau
+                    user_set=user_set
+                    # ,w_pull=current_w_pull, w_push=current_w_push, margin=m
                 )
-
-                M2 += loss.item()
-                L1 += L1_loss.item()
-                L2 += L2_loss.item()
-
+                
+                # 反传
                 optim.zero_grad()
-                loss.backward()
+                total_loss.backward()
                 optim.step()
 
-                
+                # 累计统计值
+                for k in keys:
+                    stats_sum[k] += comps[k]
+                n_batches += 1
 
-            idx += 1
-            loss_M2.append(M2 / idx)
-            loss_L1.append(L1 / idx)
-            loss_L2.append(L2 / idx)
+            # === 每个 epoch 结束：做均值 ===
+            means = {k: (stats_sum[k] / max(n_batches, 1)) for k in keys}
 
-            if (epoch+1) % 10 == 0:
-                with torch.no_grad():
-                    emb_df = self.compute_embeddings()   # 你的函数
-                adata_tmp = adata.copy()
-                adata_tmp.obsm['X_scSemi'] = emb_df.loc[adata_tmp.obs_names].values
-                sc.pp.neighbors(adata_tmp, use_rep='X_scSemi')
-                sc.tl.umap(adata_tmp)
-                sc.pl.umap(adata_tmp, color=['user_selected'], size=10, title=f"epoch {epoch+1}", show=False)
-                plt.savefig(f"umap_epoch_{epoch+1:03d}.png", dpi=160); plt.close()
+            # 兼容你原来的三条曲线（M2/L1/L2）：用合成项
+            # loss_M2.append(means['L_total'])
+            # loss_L1.append(means['L1_total'])
+            # loss_L2.append(means['L2_total'])
 
-
+            # 学习率调度每个 epoch 再 step（更常见）
             lr_scheduler.step()
-            print(f"[Epoch {epoch+1:03d}/{epochs}] M2={loss_M2[-1]:.4f}  L1={loss_L1[-1]:.4f}  L2={loss_L2[-1]:.4f}")
 
+            # 打印
+            print(f"[Epoch {epoch+1:03d}/{epochs}] "
+                f"total={means['L_total']:.4f} "
+                f"L1={means['L1']:.4f} L2={means['L2']:.4f} "
+                f"L1u={means['L_pull']:.4f} L2u={means['L_push']:.4f} "
+                f"lr={optim.param_groups[0]['lr']:.2e}")
+
+            # 可选：TensorBoard
+            if self.tb_writer is not None:
+                self.tb_writer.add_scalar('train/L_total',   means['L_total'],   epoch)
+                self.tb_writer.add_scalar('train/L1',        means['L1'],        epoch)
+                self.tb_writer.add_scalar('train/L2',        means['L2'],        epoch)
+                self.tb_writer.add_scalar('train/L_pull',   means['L_pull'],   epoch)
+                self.tb_writer.add_scalar('train/L_push',   means['L_push'],   epoch)
+                self.tb_writer.add_scalar('train/lr',        optim.param_groups[0]['lr'], epoch)
+
+            if (epoch + 1) % refresh_every == 0:
+                self._refresh_pseudo_labels(K=K_pseudo)
+            
+
+        # 训练结束：收尾
         if epochs > 0 and plot_flag:
             i = np.arange(0, epochs, 1)
-            plt.plot(i, loss_M2, color='red', label="M2")
-            plt.plot(i, loss_L1, color='blue', label='L1')
-            plt.plot(i, loss_L2, color='green', label='L2')
+            plt.plot(i, loss_M2, color='red',   label="M2 (L_total)")
+            plt.plot(i, loss_L1, color='blue',  label='L1_total')
+            plt.plot(i, loss_L2, color='green', label='L2_total')
             plt.legend(loc=0, ncol=1)
             plt.savefig('M2.jpg')
             plt.show()
 
+        if self.tb_writer is not None:
+            self.tb_writer.flush()
+
         embeddings = self.compute_embeddings()
         return embeddings
+
 
 
     def compute_embeddings(self):
@@ -241,3 +320,49 @@ class scSemiAE:
         embeddings = pd.concat(embeddings_all, axis=0).sort_index()
 
         return embeddings
+    
+    @torch.no_grad()
+    def _refresh_pseudo_labels(self, K=5):
+        """
+        用当前 encoder 在全体样本上生成伪标签，并把用户细胞并到同一“主簇”，
+        然后重建 self.train_loader 让后续 L1/L2 在全体样本上起作用。
+        """
+        self.model.eval()
+
+        # 2.1 聚齐全体样本（保持顺序），以及其细胞ID
+        xs, cells_all = [], []
+        for x, _, cells in self.pretrain_loader:
+            xs.append(x)                    # 这里是原表达，不是embedding
+            cells_all.extend(list(cells))
+        X_full = torch.cat(xs, dim=0).to(self.device)   # (N, G)
+
+        # 2.2 提 embedding（当前 encoder）
+        Z_full = self.model.encoder(X_full).detach().cpu().numpy()  # (N, D)
+
+        # 2.3 KMeans 产生伪标签
+        km = KMeans(n_clusters=K, n_init=10, random_state=0)
+        y_pseudo = km.fit_predict(Z_full)  # ndarray, shape=(N,)
+
+        # 2.4 “用户并簇”：把用户细胞的簇统一到用户细胞中最常见的那个簇
+        user_set = getattr(self, "user_set", None)
+        if user_set:
+            import numpy as np
+            user_mask = np.array([c in user_set for c in cells_all], dtype=bool)
+            if user_mask.any():
+                # 找到用户细胞里占比最多的簇作为主簇
+                labels_u = y_pseudo[user_mask]
+                # 可能用户很少、甚至只有1个，也没关系
+                # 若 labels_u 为空不会进入这里
+                vals, cnts = np.unique(labels_u, return_counts=True)
+                main_label = vals[cnts.argmax()]
+                y_pseudo[user_mask] = main_label
+
+        # 2.5 用“全体样本 + 伪标签(含用户并簇)”重建新的训练集/loader
+        #    —— 注意：这里训练输入仍是“原表达 X_full”，不是 Z_full
+        lab_tensor = X_full.detach().cpu().float()
+        lab_names  = cells_all
+        lab_labels = y_pseudo.astype(int).tolist()
+        new_dataset = ExperimentDataset(lab_tensor, lab_names, lab_labels)
+        self.train_loader = DataLoader(new_dataset, shuffle=True, batch_size=100)
+
+        self.model.train()

@@ -257,6 +257,133 @@ def umap_sixpanel_before_after(
     if savepath:
         plt.savefig(savepath, dpi=300, bbox_inches='tight')
         print(f"[Saved] {savepath}")
+    plt.savefig("umap_compare.png")
     plt.show()
 
     return fig, axes
+import numpy as np
+import numpy as np
+
+def to_dense_ndarray(X):
+    """把可能的稀疏/torch/列表统一成 2D numpy.ndarray(float32)。"""
+    if hasattr(X, "toarray"):          # scipy.sparse
+        X = X.toarray()
+    elif not isinstance(X, np.ndarray):
+        X = np.asarray(X)
+    if X.dtype != np.float32:
+        X = X.astype(np.float32, copy=False)
+    return X
+
+def prepare_labeled_subset(
+    adata,
+    annot_col="orig_annot",
+    user_col="user_selected",
+    user_class_name="USER_CLASS",
+    # —— 过滤 unknown 的设置 —— 
+    unknown_values=("unknown", "na", "nan", "unassigned", "None", "NONE", "Unassigned"),
+    # —— 抽样设置（非用户样本）——
+    keep_ratio=None,          # 每个真实类别按比例抽样，如 0.2；与 per_class_cap 二选一
+    per_class_cap=None,       # 每个真实类别最多保留多少个，如 10；与 keep_ratio 二选一
+    min_per_class=1,          # 每类至少保留多少个（在有样本的前提下）
+    seed=0,
+    encode_labels=True,
+):
+    """
+    返回：用于监督训练的子集（X_l, ids_l, y_l），并附带若干辅助信息（字典）。
+    规则：
+      - 用户选择的样本：全部保留，标签强制为 user_class_name。
+      - 非用户样本：若标签在 unknown_values 或为缺失，则剔除；剩余按 keep_ratio/per_class_cap 分层抽样。
+    """
+    rng = np.random.RandomState(seed)
+
+    # 1) 特征矩阵（所有样本）
+    X_all = to_dense_ndarray(adata.X)
+    N = X_all.shape[0]
+    obs_names = adata.obs_names.to_numpy()
+
+    # 2) 原标签（字符串）
+    raw_labels = adata.obs[annot_col].astype(str).to_numpy()
+
+    # 3) 用户布尔
+    if adata.obs[user_col].dtype == bool:
+        is_user = adata.obs[user_col].to_numpy()
+    else:
+        is_user = adata.obs[user_col].astype(str).str.lower().isin(
+            {"true","1","yes","y","selected"}
+        ).to_numpy()
+
+    # 4) unknown 的定义（统一小写比较）
+    unknown_set = {str(u).strip().lower() for u in unknown_values}
+
+    # 5) 先把用户样本挑出来（它们的标签强制为 user_class_name）
+    user_idx = np.flatnonzero(is_user)
+    user_labels = np.array([user_class_name] * user_idx.size, dtype=object)
+
+    # 6) 非用户样本里，过滤 unknown/缺失
+    non_user_idx_all = np.flatnonzero(~is_user)
+    raw_non_user_lab = raw_labels[non_user_idx_all].astype(str)
+    m_known = np.array([lab.strip().lower() not in unknown_set for lab in raw_non_user_lab], dtype=bool)
+    non_user_idx = non_user_idx_all[m_known]
+    non_user_lab = raw_labels[non_user_idx].astype(str)
+
+    # 7) 在非用户可用样本中，做“按类分层抽样”
+    #    两种方式：keep_ratio 或 per_class_cap（传一个即可）
+    if (keep_ratio is None) and (per_class_cap is None):
+        # 若两者都未指定，默认“不过度抽样”：每类全保留（可自行改为更小的监督集）
+        chosen_idx = non_user_idx.copy()
+    else:
+        chosen = []
+        uniq = np.unique(non_user_lab)
+        for c in uniq:
+            pool = non_user_idx[ non_user_lab == c ]
+            if pool.size == 0:
+                continue
+            if keep_ratio is not None:
+                k = max(min_per_class, int(np.ceil(pool.size * float(keep_ratio))))
+            else:
+                k = max(min_per_class, int(per_class_cap))
+            k = min(k, pool.size)
+            if k > 0:
+                chosen.append(rng.choice(pool, size=k, replace=False))
+        chosen_idx = np.concatenate(chosen, axis=0) if len(chosen) > 0 else np.array([], dtype=int)
+
+    chosen_lab = raw_labels[chosen_idx].astype(str)
+
+    # 8) 监督训练用的“最终有标签子集” = 用户样本 ∪ 被抽样的非用户样本
+    labeled_idx = np.concatenate([user_idx, chosen_idx], axis=0)
+    labeled_lab = np.concatenate([user_labels, chosen_lab], axis=0)
+
+    # 9) 编码标签（可选）
+    if encode_labels:
+        uniq = np.unique(labeled_lab)
+        cls2idx = {c: i for i, c in enumerate(uniq)}
+        y_l = np.array([cls2idx[c] for c in labeled_lab], dtype=np.int64)
+    else:
+        cls2idx = None
+        y_l = labeled_lab.tolist()
+
+    # 10) 整理输出
+    X_l = X_all[labeled_idx]
+    ids_l = obs_names[labeled_idx]
+
+    # 额外信息（方便你打印/检查）
+    info = {
+        "num_total": int(N),
+        "num_user": int(user_idx.size),
+        "num_non_user_known": int(non_user_idx.size),
+        "num_labeled_final": int(labeled_idx.size),
+        "per_class_counts_after_sampling": {},
+        "mapping_cls2idx": cls2idx,
+        "indices": {
+            "user_idx": user_idx.tolist(),
+            "non_user_idx_kept_pool": non_user_idx.tolist(),
+            "non_user_idx_chosen": chosen_idx.tolist(),
+            "labeled_idx": labeled_idx.tolist(),
+        },
+    }
+    # 统计分布（字符串标签视角）
+    _, cnts = np.unique(labeled_lab, return_counts=True)
+    for k, v in zip(np.unique(labeled_lab), cnts):
+        info["per_class_counts_after_sampling"][str(k)] = int(v)
+
+    return X_l, ids_l.tolist(), y_l, info

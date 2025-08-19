@@ -23,6 +23,9 @@ parser.add_argument('--pseudo_M', type=int, default=500, help='伪正扩充数�
 parser.add_argument('--neg_ratio', type=float, default=2.0, help='负样本与正样本数量比例（默认 2x）')
 args = parser.parse_args()
 
+
+COL_NAME="cluster-10"
+
 # make sure saving path exists
 import os
 if not os.path.exists(args.save_path):
@@ -51,7 +54,7 @@ from utils import extract_cells_by_index, cluster_and_plot, umap_sixpanel_before
 # from eval import plot_similar_n, compute_dist_metrics, nearestN_utilization_expression
 from eval import plot_similar_n_compare, compute_dist_metrics_compare,nearestN_utilization_expression_compare
     
-
+from utils import prepare_labeled_subset,to_dense_ndarray
 
 # ================ Utils ================
 def set_all_seeds(seed: int):
@@ -80,8 +83,8 @@ def main():
     cell_id = adata_raw.obs_names.tolist()
 
     # ============ 用户选择（严格布尔 & 仅一次） ============
-    # 你已有的索引列表
-    cell_idx_list = [7,10,25,37,47,61,72,81,93,103,107,119,120,126,127,144,171,200,213,220,251,254,257,258,260,271,275,276,282,293,305,308,309,312,346,376,378,379,425,427,437,438,452,460,469,494,497,501,516,535,538,540,559,563,578,584,595,601,605,614,632,637,650,652,656,661,662,665,685,707,711,730,733,738,742,743,772,773,775,776,778,784,804,810,812,839,840,851,854,860,868,869,884,896,905,908,912,920,921,941,949,965,967,970,971,978,981,1003,1013,1028,1047,1049,1052,1060,1077,1083,1087,1089,1092,1112,1113,1121,1125,1136,1148,1151,1162,1163,1165,1173,1181,1182,1192,1204,1208,1216,1217,1241,1258,1263,1268,1282,1294,1322,1336,1338,1341,1349,1350,1361,1364,1371,1372,1382,1384,1394,1407,1410,1417,1421,1436,1441,1464,1467,1473,1474,1475,1490,1509,1515,1517,1520,1527,1545,1546,1549,1567,1578,1581,1584,1587,1595,1603,1606,1607,1617,1619,1620,1621,1627,1630,1637,1642,1656,1672,1673,1678,1679,1680,1689,1710,1718,1728,1732,1733,1739,1751,1765,1769,1773,1781,1790,1801,1804,1816,1822,1828,1830,1835,1840,1850,1856,1858,1898,1911,1924,1937,1947,1948,1949,1961,1966,1970,1972,1973,1974,1975,1981,1983,1994,1997,2000,2001,2010,2014,2022,2023,2034,2046,2057,2064,2070,2075,2080,2085,2106,2133,2145,2150,2155,2174,2185,2189,2195,2196,2207,2213,2226,2229,2231,2249,2253,2255,2256,2271,2273,2277,2283,2285,2286,2290,2291,2295,2303,2312,2313,2317,2320,2323,2325,2327,2347,2351,2366,2376,2377,2384,2395,2397,2401,2403,2405,2406,2417,2421,2429,2441,2456,2464,2469,2472,2481,2483,2489,2497,2500,2503,2504,2521,2522,2525,2535,2539,2544,2548,2553,2556,2571,2575,2582,2583,2591,2615,2616,2617,2621,2623,2626,2629,2641,2648,2660,2661,2674,2676,2682,2688,2694,2696,2703,2705,2716,2721,2724,2727,2732,2734,2740,2743,2752,2761,2762,2765,2766,2776,2798,2802,2822,2828,2834,2838,2849,2870,2881,2888,2893,2911,2916,2917,2925,2926,2931,2936,2937,2942,2950,2951,2954,2961,2972,2976,2978,2981,2997,612,902,0,3,12,98,114,128,147,151,185,218,219,228,234,236,240,241,287,295,304,318,364,409,443,445,453,480,519,525,536,562,572,627,647,676,694,698,705,724,749,779,783,787,811,892,893,894,904,917,930,974,979,983,986,999,1004,1031,1038,1078,1081,1090,1100,1130,1168,1180,1185,1194,1197,1248,1256,1278,1326,1333,1340,1346,1347,1356,1365,1373,1389,1409,1429,1448,1449,1453,1476,1477,1479,1514,1565,1583,1616,1625,1632,1670,1676,1686,1702,1724,1741,1748,1749,1796,1823,1827,1839,1848,1854,1903,1906,1952,1969,1978,1986,1999,2005,2019,2021,2024,2084,2098,2099,2100,2190,2205,2216,2239,2247,2262,2294,2304,2322,2332,2336,2355,2413,2446,2448,2467,2478,2488,2491,2530,2536,2538,2545,2546,2560,2563,2665,2672,2698,2702,2777,2779,2788,2793,2801,2807,2812,2824,2825,2839,2840,2865,2878,2909,2924]
+
+    cell_idx_list=[12,98,114,147,151,218,219,228,234,236,240,295,318,364,409,443,525,536,572,627,647,676,779,783,811,836,892,894,904,930,979,983,999,1004,1031,1038,1078,1090,1154,1168,1185,1194,1197,1213,1248,1295,1326,1333,1365,1367,1373,1393,1429,1448,1453,1529,1565,1583,1616,1625,1632,1670,1686,1702,1724,1748,1780,1827,1839,1854,1903,1906,1936,1944,1977,1978,1986,1999,2005,2021,2024,2084,2098,2100,2190,2205,2239,2247,2262,2294,2304,2336,2355,2446,2448,2467,2478,2488,2491,2530,2536,2538,2542,2545,2546,2560,2606,2672,2698,2702,2788,2801,2807,2824,2825,2839,2840,2878,2884,2909,2924,2967,2986,97,645,681,695,832,1178,1376,1400,1770,1976,2311,2664,2707,2855]
 
     pos_idx = np.array(cell_idx_list, dtype=int)
     pos_idx = pos_idx[(pos_idx >= 0) & (pos_idx < adata_raw.n_obs)]
@@ -90,6 +93,20 @@ def main():
     user_sel = np.zeros(adata_raw.n_obs, dtype=bool)
     user_sel[pos_idx] = True
     adata_raw.obs['user_selected'] = user_sel  # bool！
+
+    # ==== 构造 prior_label：把原注释 + USER 合在一套标签空间里 ====
+    import pandas as pd
+    lab_col = 'leiden-1'                     # 原始注释列；如果叫别的，改成对应列名
+    lab = adata_raw.obs[lab_col].astype('category').astype(str)
+    lab[adata_raw.obs['user_selected'].astype(bool)] = 'USER'  # 用户细胞统一成特殊类
+
+    cats = pd.Index(sorted(lab.unique()))
+    cat2id = {c:i for i,c in enumerate(cats)}                  # str 类名 -> int
+    prior_id = lab.map(cat2id).astype(int)                     # 与 obs 顺序对齐
+
+    # 做一个 cell_id -> prior_id 的字典，未找到时默认 -1（即“无先验”）
+    prior_label_dict = {cell: int(pid) for cell, pid in zip(adata_raw.obs_names, prior_id)}
+
 
     # ============ 构建 pretrain / labeled（先不启用伪正/重加权） ============
     Xw = X
@@ -114,21 +131,46 @@ def main():
     lab_names  = adata_raw.obs_names[pos_idx].tolist() + adata_raw.obs_names[neg_idx].tolist()  # 字符串 ID
     lab_labels = [1]*len(pos_idx) + [0]*len(neg_idx)
 
+
+
     labeled_data = ExperimentDataset(lab_tensor, lab_names, lab_labels)
+
+    # from utils import prepare_labeled_dataset,to_dense_ndarray
+
+#     labeled_data, labeled_cellid, labeled_lab = prepare_labeled_dataset(
+#     adata_raw,
+#     annot_col="leiden-1",
+#     user_col="user_selected",
+#     user_class_name="USER_CLASS"
+# )
+    
+
+    # ===== labeled_data =====
+    X_l, ids_l, y_l, info = prepare_labeled_subset(
+        adata_raw,
+        annot_col="annotation",
+        user_col="user_selected",
+        user_class_name="USER_CLASS",
+        unknown_values=("unknown"),
+        keep_ratio=0.2,          
+        min_per_class=1,
+        seed=args.seed,
+        encode_labels=True
+    )
+
+
+    labeled_data = ExperimentDataset(X_l, ids_l, y_l)  # 直接塞入就行
+
+
+    # labeled_data = ExperimentDataset(labeled_data, labeled_cellid, labeled_lab)
 
     # ============ 训练 ============
     model = scSemiAE(args, labeled_data, pretrain_data, hid_dim_1=500, hid_dim_2=50)
     model.user_set = set(adata_raw.obs_names[pos_idx].tolist())  # 与 Dataset 的 cells 同为字符串
 
-    # （可选）增强个性化权重做“能量测试”
-    model.alpha_user = 12.0
-    model.beta_user  = 10.0
-    model.use_triplet = True
-    model.w_triplet   = 0.8
-    model.triplet_margin = 0.6
-    model.use_supcon  = True
-    model.w_supcon    = 0.8
-    model.supcon_tau  = 0.07
+
+
+
 
     # 简短命中检查
     for b, (_, _, cells) in enumerate(model.train_loader):
@@ -149,9 +191,10 @@ def main():
     # AFTER：基于 latent 的新聚类
     adata_after = adata_raw.copy()
     adata_after.obsm['X_scSemi'] = emb
-    sc.pp.neighbors(adata_after, n_neighbors=30, use_rep='X_scSemi', metric='euclidean')
+    # sc.pp.neighbors(adata_after, n_neighbors=50, use_rep='X_scSemi', metric='euclidean')
+    sc.pp.neighbors(adata_after, n_neighbors=50, use_rep='X_scSemi', metric='cosine') 
     sc.tl.umap(adata_after, random_state=args.seed)
-    sc.tl.leiden(adata_after, key_added='cluster', resolution=1.0)
+    sc.tl.leiden(adata_after, key_added=COL_NAME, resolution=1.0)
 
     # ========= BEFORE：沿用原始 UMAP，不重算 =========
     adata_before = adata_raw.copy()
@@ -162,7 +205,7 @@ def main():
         sc.pp.neighbors(adata_before, n_neighbors=30, use_rep=None, metric='euclidean')
     sc.tl.umap(adata_before, random_state=args.seed)
 
-# 原注释列名（你文件里叫什么就用什么；若已有如 'leiden-1'、'cell_type'，直接用）
+
     ORIG_LABEL = 'leiden-1'
     if ORIG_LABEL not in adata_before.obs.columns:
         # 想要一个“原结果标签”用于上图，但不改变 UMAP 坐标
@@ -177,7 +220,7 @@ def main():
         adata_before=adata_before,
         adata_after=adata_after,
         orig_label_col='leiden-1',
-        new_cluster_col='cluster',
+        new_cluster_col=COL_NAME,
         user_col='user_selected',
         use_rep_before=None,
         use_rep_after='X_scSemi',
@@ -202,43 +245,36 @@ def main():
     _ = plot_similar_n_compare(
         adata_before, adata_after,
         cluster_col_before='leiden-1',   # 你 before 的列名
-        cluster_col_after='cluster',       # 你 after 的列名
+        cluster_col_after=COL_NAME,       # 你 after 的列名
         max_n=20, metric='cosine'
     )
 
     # Dist 指标对比
-    _ = compute_dist_metrics_compare(
-        adata_before, adata_after,
-        cluster_col_before='leiden-1',
-        cluster_col_after='cluster',
-        user_col='user_selected',          # 类别/字符串/布尔都可
-        top_frac=0.30
+    res = compute_dist_metrics_compare(
+        adata_after,
+        cluster_col=COL_NAME,
+        user_col='user_selected',
+        top_frac=0.30,
+        title='After | User vs Non (UMAP)'
     )
 
     # Nearest-N（表达空间）对比
-    _ = nearestN_utilization_expression_compare(
-        adata_before, adata_after,
-        cluster_col_before='leiden-1',
-        cluster_col_after='cluster',
-        user_col='user_selected',
-        metric='cosine', top_frac=0.30
+    res = nearestN_utilization_expression_compare(
+        adata_before,
+        adata_after,
+        cluster_col_before="leiden-1",   # before 的聚类列
+        cluster_col_after=COL_NAME,       # after 的聚类列
+        user_col="user_selected",          # 用户标记列
+        n_list=list(range(50, 1001, 50)),   # 最近邻数量 N 序列
+        metric="cosine",                   # 距离度量
+        debug_k=50                         # 打印前 50 个近邻的分布
     )
 
 
 
 
-    # # ============ 评估（在 after 上评新聚类） ============
-    # from eval import plot_similar_n, compute_dist_metrics, nearestN_utilization_expression
-    # _ = plot_similar_n(adata_after, max_n=20)
-    # _ = compute_dist_metrics(adata_after, plot=True)
-    # _ = nearestN_utilization_expression(
-    #     adata=adata_after,
-    #     cluster_col="cluster",
-    #     user_col="user_selected",
-    #     metric="cosine",
-    #     top_frac=0.30,
-    #     plot=True
-    # )
+
+ 
 
     # ============ 保存 latent ============
     if args.save_path:
@@ -247,8 +283,13 @@ def main():
         embeddings_df.to_csv(embd_save_path)
         print("[Saved]", embd_save_path)
 
+
+    # adata_after.write_h5ad("sc_sampled.h5ad", compression="gzip")
+    # 
     print("######################## over!")
     # print("######################## over!")
+
+
 
 # 程序入口
 if __name__ == "__main__":
